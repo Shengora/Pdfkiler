@@ -29,7 +29,49 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
             if not clean_title:
                 clean_title = "manga_chapter"
 
+
             await page.wait_for_timeout(3000)
+
+            # Remove adblock modals, header/footer and sticky elements
+            await page.evaluate('''() => {
+                // Hide header/nav immediately if possible
+                const headers = document.querySelectorAll('header, nav, .header, .nav, .navbar, .sticky-top');
+                headers.forEach(h => h.style.display = 'none');
+
+                const allElements = document.querySelectorAll('*');
+                for (let el of allElements) {
+                    const style = window.getComputedStyle(el);
+                    if (style.position === 'fixed' || style.position === 'sticky') {
+                        el.style.display = 'none';
+                    }
+                    if (style.zIndex > 100 && style.position === 'absolute') {
+                        el.style.display = 'none';
+                    }
+                }
+
+                // Specific text checks for adblock modals
+                const textElements = document.querySelectorAll('div, section, article, p, h1, h2, h3, h4, h5');
+                for (let el of textElements) {
+                    const text = el.innerText ? el.innerText.toLowerCase() : '';
+                    if (text.includes("adblock'ni o'chiring") || text.includes('adblock') || text.includes('reklama')) {
+                        // Find the containing modal and hide it (assuming it's relatively small)
+                        if (el.innerText.length < 1000) {
+                            // try to hide parent nodes until we hit body
+                            let parent = el;
+                            while(parent && parent.tagName !== 'BODY') {
+                                const style = window.getComputedStyle(parent);
+                                if (style.position === 'fixed' || style.position === 'absolute' || parent.classList.contains('modal') || parent.classList.contains('popup')) {
+                                    parent.style.display = 'none';
+                                    break;
+                                }
+                                parent = parent.parentElement;
+                            }
+                            // also hide the element itself just in case
+                            el.style.display = 'none';
+                        }
+                    }
+                }
+            }''')
 
             # Skrolling
             last_height = await page.evaluate("document.body.scrollHeight")
@@ -41,8 +83,9 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
                     break
                 last_height = new_height
 
+
             # Elementlarni topish
-            image_elements = await page.query_selector_all('img[src*="cdn.mangalab.uz/reader"], img[data-src*="cdn.mangalab.uz/reader"]')
+            image_elements = await page.query_selector_all('img[src*="cdn.mangalab.uz/reader"], img[data-src*="cdn.mangalab.uz/reader"], .reading-content img, .page-break img, .wp-manga-chapter-img')
 
             if not image_elements:
                 return False, None
