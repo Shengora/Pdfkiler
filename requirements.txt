@@ -1,0 +1,5 @@
+aiogram>=3.4.0
+playwright>=1.41.0
+Pillow>=10.2.0
+aiohttp>=3.9.3
+python-dotenv>=1.0.1
