@@ -85,7 +85,7 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
 
 
             # Elementlarni topish
-            image_elements = await page.query_selector_all('img[src*="cdn.mangalab.uz/reader"], img[data-src*="cdn.mangalab.uz/reader"], .reading-content img, .page-break img, .wp-manga-chapter-img')
+            image_elements = await page.query_selector_all('img[src*="cdn.mangalab.uz/reader"], img[data-src*="cdn.mangalab.uz/reader"], .reading-content img, .page-break img, .wp-manga-chapter-img, img[src*="cdn.mangabox.uz"]')
 
             if not image_elements:
                 return False, None

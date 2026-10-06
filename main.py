@@ -39,18 +39,18 @@ def parse_manga_url(url):
 @dp.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext):
     await message.answer(
-        "Assalomu alaykum! Men Mangalab.uz saytidan mangalarni PDF qilib yuklab beruvchi botman.\n\n"
+        "Assalomu alaykum! Men Mangalab.uz va Mangabox.uz saytlaridan mangalarni PDF qilib yuklab beruvchi botman.\n\n"
         "Menga shunchaki biror manganing bobi (glavasi) havolasini yuboring."
     )
     await state.set_state(DownloadState.waiting_for_url)
 
-@dp.message(DownloadState.waiting_for_url, F.text.startswith("https://mangalab.uz/"))
+@dp.message(DownloadState.waiting_for_url, (F.text.startswith("https://mangalab.uz/") | F.text.startswith("https://www.mangabox.uz/") | F.text.startswith("https://mangabox.uz/")))
 async def process_url(message: Message, state: FSMContext):
     url = message.text
     base_url, chapter, tail = parse_manga_url(url)
 
     if not base_url:
-        await message.answer("Siz yuborgan havolada bob (glava) raqami topilmadi. Iltimos aniq bob linkini yuboring (masalan .../bob/1/).")
+        await message.answer("Siz yuborgan havolada bob (glava) raqami topilmadi. Iltimos aniq bob linkini yuboring (masalan .../bob/1/ yoki .../read?...).")
         return
 
     await state.update_data(url=url, base_url=base_url, tail=tail, original_chapter=chapter)
@@ -64,7 +64,7 @@ async def process_url(message: Message, state: FSMContext):
 
 @dp.message(DownloadState.waiting_for_url)
 async def process_invalid_url(message: Message):
-    await message.answer("Iltimos, mangalab.uz saytidan to'g'ri havola yuboring.")
+    await message.answer("Iltimos, mangalab.uz yoki mangabox.uz saytidan to'g'ri havola yuboring.")
 
 @dp.callback_query(F.data == "range_single")
 async def process_range_single(callback: CallbackQuery, state: FSMContext):
@@ -160,7 +160,10 @@ async def process_downloads(message: Message, data: dict, custom_name_template: 
         await message.answer(f"Jami {end_ch - start_ch + 1} ta bob yuklab olinadi. Iltimos kuting...")
 
         for ch in range(start_ch, end_ch + 1):
-            url = f"{base_url}{ch}{tail}"
+            if "__ch" in base_url: # Mangabox logic
+                url = f"{base_url}{ch:03d}&no={ch}"
+            else: # Mangalab logic
+                url = f"{base_url}{ch}{tail}"
             filename = format_filename(custom_name_template, ch, is_multiple=True)
             await download_and_send(message, url, filename, chapter_num=ch)
 
@@ -209,3 +212,24 @@ async def start_bot():
 
 if __name__ == "__main__":
     asyncio.run(start_bot())
+\ndef parse_manga_url(url):
+    # Mangalab format: .../bob/1/
+    match_mangalab = re.search(r'(.*\/bob\/)(\d+)(\/.*)?', url)
+    if match_mangalab:
+        base_url = match_mangalab.group(1)
+        current_chapter = int(match_mangalab.group(2))
+        tail = match_mangalab.group(3) if match_mangalab.group(3) else "/"
+        return base_url, current_chapter, tail
+
+    # Mangabox format: .../read?titleId=xxx&episodeId=xxx__ch001&no=1
+    match_mangabox = re.search(r'(.*__ch)(\d+)(&no=)(\d+)', url)
+    if match_mangabox:
+        base_url = match_mangabox.group(1)
+        # mangabox uses padded chapter strings (e.g. 001) in episodeId but integer in `no`
+        # We'll use `no` parameter as the primary chapter number for logic
+        # format: f"{base_url}{ch:03d}&no={ch}"
+        ch_str = match_mangabox.group(2)
+        current_chapter = int(match_mangabox.group(4))
+        return base_url, current_chapter, "" # We construct the tail dynamically
+
+    return None, None, None
