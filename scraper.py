@@ -73,43 +73,68 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
                 }
             }''')
 
-            # Skrolling
+            # Smooth scrolling to trigger lazy loading for all images
             last_height = await page.evaluate("document.body.scrollHeight")
+            stagnant_count = 0
             while True:
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(2000)
-                new_height = await page.evaluate("document.body.scrollHeight")
-                if new_height == last_height:
+                # Scroll down by viewport height
+                await page.evaluate("window.scrollBy(0, window.innerHeight)")
+                await page.wait_for_timeout(500)
+
+                # Also check if we reached the bottom
+                current_scroll = await page.evaluate("window.scrollY + window.innerHeight")
+                current_height = await page.evaluate("document.body.scrollHeight")
+
+                if current_height > last_height:
+                    last_height = current_height
+                    stagnant_count = 0
+                elif current_scroll >= current_height - 10: # Reached bottom
+                    stagnant_count += 1
+
+                if stagnant_count >= 5: # Give it some time if it just reached bottom
                     break
-                last_height = new_height
 
 
             # Elementlarni topish
             image_elements = await page.query_selector_all('img[src*="cdn.mangalab.uz/reader"], img[data-src*="cdn.mangalab.uz/reader"], .reading-content img, .page-break img, .wp-manga-chapter-img, img[src*="cdn.mangabox.uz"]')
 
             if not image_elements:
+                print("No image elements found with selector")
                 return False, None
 
+            print(f"Found {len(image_elements)} image elements")
             downloaded_images = []
             for i, img_el in enumerate(image_elements):
                 try:
-                    await img_el.scroll_into_view_if_needed()
-                    await page.wait_for_timeout(500)
+                    # Retrieve the image source URL
+                    src = await img_el.get_attribute('data-src') or await img_el.get_attribute('src')
+                    if not src:
+                        continue
 
-                    is_loaded = await img_el.evaluate("el => el.complete && el.naturalWidth !== 0")
-                    if not is_loaded:
-                        await page.wait_for_timeout(2000)
+                    # Fix relative URLs if needed
+                    if src.startswith('//'):
+                        src = 'https:' + src
+                    elif src.startswith('/'):
+                        from urllib.parse import urljoin
+                        src = urljoin(page.url, src)
 
-                    image_bytes = await img_el.screenshot()
+                    # Download directly
+                    response = await context.request.get(src)
+                    if response.ok:
+                        image_bytes = await response.body()
+                    else:
+                        print(f"Error fetching image {i}: Status {response.status}")
+                        continue
 
                     img = Image.open(io.BytesIO(image_bytes))
                     if img.mode != 'RGB':
                         img = img.convert('RGB')
                     downloaded_images.append(img)
                 except Exception as e:
-                    print(f"Error screenshotting image {i}: {e}")
+                    print(f"Error downloading image {i}: {e}")
 
             if not downloaded_images:
+                print("No downloaded images to save")
                 return False, None
 
             if output_filename is None:
