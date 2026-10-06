@@ -28,12 +28,21 @@ class DownloadState(StatesGroup):
     waiting_for_custom_name = State()
 
 def parse_manga_url(url):
-    match = re.search(r'(.*\/bob\/)(\d+)(\/.*)?', url)
-    if match:
-        base_url = match.group(1)
-        current_chapter = int(match.group(2))
-        tail = match.group(3) if match.group(3) else "/"
+    # Mangalab format: .../bob/1/
+    match_mangalab = re.search(r'(.*\/bob\/)(\d+)(\/.*)?', url)
+    if match_mangalab:
+        base_url = match_mangalab.group(1)
+        current_chapter = int(match_mangalab.group(2))
+        tail = match_mangalab.group(3) if match_mangalab.group(3) else "/"
         return base_url, current_chapter, tail
+
+    # Mangabox format: .../read?titleId=xxx&episodeId=xxx__ch001&no=1
+    match_mangabox = re.search(r'(.*__ch)(\d+)(&no=)(\d+)', url)
+    if match_mangabox:
+        base_url = match_mangabox.group(1)
+        current_chapter = int(match_mangabox.group(4))
+        return base_url, current_chapter, ""
+
     return None, None, None
 
 @dp.message(CommandStart())
@@ -212,24 +221,3 @@ async def start_bot():
 
 if __name__ == "__main__":
     asyncio.run(start_bot())
-\ndef parse_manga_url(url):
-    # Mangalab format: .../bob/1/
-    match_mangalab = re.search(r'(.*\/bob\/)(\d+)(\/.*)?', url)
-    if match_mangalab:
-        base_url = match_mangalab.group(1)
-        current_chapter = int(match_mangalab.group(2))
-        tail = match_mangalab.group(3) if match_mangalab.group(3) else "/"
-        return base_url, current_chapter, tail
-
-    # Mangabox format: .../read?titleId=xxx&episodeId=xxx__ch001&no=1
-    match_mangabox = re.search(r'(.*__ch)(\d+)(&no=)(\d+)', url)
-    if match_mangabox:
-        base_url = match_mangabox.group(1)
-        # mangabox uses padded chapter strings (e.g. 001) in episodeId but integer in `no`
-        # We'll use `no` parameter as the primary chapter number for logic
-        # format: f"{base_url}{ch:03d}&no={ch}"
-        ch_str = match_mangabox.group(2)
-        current_chapter = int(match_mangabox.group(4))
-        return base_url, current_chapter, "" # We construct the tail dynamically
-
-    return None, None, None
