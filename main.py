@@ -157,8 +157,9 @@ async def process_downloads(message: Message, data: dict, custom_name_template: 
 
     if chapters_type == "single":
         url = data.get("url")
-        filename = format_filename(custom_name_template, data.get("original_chapter"), is_multiple=False)
-        await download_and_send(message, url, filename)
+        chapter_num = data.get("original_chapter")
+        filename = format_filename(custom_name_template, chapter_num, is_multiple=False)
+        await download_and_send(message, url, filename, chapter_num=chapter_num)
 
     elif chapters_type == "multiple":
         base_url = data.get("base_url")

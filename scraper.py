@@ -119,7 +119,7 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
                         src = urljoin(page.url, src)
 
                     # Download directly
-                    response = await context.request.get(src)
+                    response = await context.request.get(src, headers={"Referer": page.url})
                     if response.ok:
                         image_bytes = await response.body()
                     else:
