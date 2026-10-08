@@ -75,7 +75,7 @@ async def process_url(message: Message, state: FSMContext):
 async def process_invalid_url(message: Message):
     await message.answer("Iltimos, mangalab.uz yoki mangabox.uz saytidan to'g'ri havola yuboring.")
 
-@dp.callback_query(F.data == "range_single")
+@dp.callback_query(DownloadState.waiting_for_url, F.data == "range_single")
 async def process_range_single(callback: CallbackQuery, state: FSMContext):
     await state.update_data(chapters="single")
 
@@ -84,16 +84,30 @@ async def process_range_single(callback: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="O'zim nom kiritaman (Shablon)", callback_data="name_custom")]
     ])
 
-    await callback.message.edit_text("PDF fayl qanday nom bilan saqlansin?", reply_markup=keyboard)
+    try:
+        await callback.message.edit_text("PDF fayl qanday nom bilan saqlansin?", reply_markup=keyboard)
+    except Exception as e:
+        print(f"Error in process_range_single edit_text: {e}")
+        # Agar xatolik bo'lsa (masalan xabar o'zgarmasa), baribir javob yuborish
+        await callback.message.answer("PDF fayl qanday nom bilan saqlansin?", reply_markup=keyboard)
+
     await state.set_state(DownloadState.waiting_for_filename_choice)
     await callback.answer()
 
-@dp.callback_query(F.data == "range_multiple")
+@dp.callback_query(DownloadState.waiting_for_url, F.data == "range_multiple")
 async def process_range_multiple(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "Qaysi oraliqdagi boblarni yuklamoqchisiz? \n"
-        "Masalan: 1-5 yoki 10-15 shaklida raqamlarni yozib yuboring."
-    )
+    try:
+        await callback.message.edit_text(
+            "Qaysi oraliqdagi boblarni yuklamoqchisiz? \n"
+            "Masalan: 1-5 yoki 10-15 shaklida raqamlarni yozib yuboring."
+        )
+    except Exception as e:
+        print(f"Error in process_range_multiple edit_text: {e}")
+        await callback.message.answer(
+            "Qaysi oraliqdagi boblarni yuklamoqchisiz? \n"
+            "Masalan: 1-5 yoki 10-15 shaklida raqamlarni yozib yuboring."
+        )
+
     await state.set_state(DownloadState.waiting_for_chapter_range)
     await callback.answer()
 
