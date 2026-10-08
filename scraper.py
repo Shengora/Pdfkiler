@@ -2,6 +2,7 @@ import asyncio
 import io
 import os
 import re
+from urllib.parse import urljoin
 from PIL import Image
 from playwright.async_api import async_playwright
 
@@ -76,7 +77,11 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
             # Smooth scrolling to trigger lazy loading for all images
             last_height = await page.evaluate("document.body.scrollHeight")
             stagnant_count = 0
-            while True:
+            scroll_attempts = 0
+            max_scroll_attempts = 300 # Increased limit to handle very long manga chapters
+
+            while scroll_attempts < max_scroll_attempts:
+                scroll_attempts += 1
                 # Scroll down by viewport height
                 await page.evaluate("window.scrollBy(0, window.innerHeight)")
                 await page.wait_for_timeout(500)
@@ -94,7 +99,6 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
                 if stagnant_count >= 5: # Give it some time if it just reached bottom
                     break
 
-
             # Elementlarni topish
             image_elements = await page.query_selector_all('img[src*="cdn.mangalab.uz/reader"], img[data-src*="cdn.mangalab.uz/reader"], .reading-content img, .page-break img, .wp-manga-chapter-img, img[src*="cdn.mangabox.uz"]')
 
@@ -103,47 +107,79 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
                 return False, None
 
             print(f"Found {len(image_elements)} image elements")
+
+            # Extract URLs first
+            image_urls = []
+            for img_el in image_elements:
+                src = await img_el.get_attribute('data-src') or await img_el.get_attribute('src')
+                if not src:
+                    continue
+                if src.startswith('//'):
+                    src = 'https:' + src
+                elif src.startswith('/'):
+                    src = urljoin(page.url, src)
+                image_urls.append(src)
+
             downloaded_images = []
-            for i, img_el in enumerate(image_elements):
+
+            # Helper function for async download
+            async def download_image(url: str, index: int):
                 try:
-                    # Retrieve the image source URL
-                    src = await img_el.get_attribute('data-src') or await img_el.get_attribute('src')
-                    if not src:
-                        continue
-
-                    # Fix relative URLs if needed
-                    if src.startswith('//'):
-                        src = 'https:' + src
-                    elif src.startswith('/'):
-                        from urllib.parse import urljoin
-                        src = urljoin(page.url, src)
-
-                    # Download directly
-                    response = await context.request.get(src, headers={"Referer": page.url})
+                    response = await context.request.get(url, headers={"Referer": page.url}, timeout=15000)
                     if response.ok:
                         image_bytes = await response.body()
+                        img = Image.open(io.BytesIO(image_bytes))
+                        if img.mode != 'RGB':
+                            img = img.convert('RGB')
+                        return index, img
                     else:
-                        print(f"Error fetching image {i}: Status {response.status}")
-                        continue
-
-                    img = Image.open(io.BytesIO(image_bytes))
-                    if img.mode != 'RGB':
-                        img = img.convert('RGB')
-                    downloaded_images.append(img)
+                        print(f"Error fetching image {index}: Status {response.status}")
+                        return index, None
                 except Exception as e:
-                    print(f"Error downloading image {i}: {e}")
+                    print(f"Error downloading image {index}: {e}")
+                    return index, None
+
+            # Download images concurrently in batches
+            batch_size = 5
+            results = []
+            for i in range(0, len(image_urls), batch_size):
+                batch = image_urls[i:i+batch_size]
+                tasks = [download_image(url, i + j) for j, url in enumerate(batch)]
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                for res in batch_results:
+                    if isinstance(res, tuple) and res[1] is not None:
+                        results.append(res)
+
+            # Sort by index to maintain order
+            results.sort(key=lambda x: x[0])
+            downloaded_images = [img for _, img in results]
 
             if not downloaded_images:
                 print("No downloaded images to save")
                 return False, None
 
+            # Find the maximum width among all images
+            max_width = max(img.width for img in downloaded_images)
+
+            # Resize images to match the maximum width while preserving aspect ratio
+            resized_images = []
+            for img in downloaded_images:
+                if img.width != max_width:
+                    # Calculate new height preserving aspect ratio
+                    new_height = int((max_width / img.width) * img.height)
+                    # Use Resampling.LANCZOS for high-quality downsampling/upsampling
+                    resized_img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+                    resized_images.append(resized_img)
+                else:
+                    resized_images.append(img)
+
             if output_filename is None:
                 output_filename = f"{clean_title}.pdf"
 
-            downloaded_images[0].save(
+            resized_images[0].save(
                 output_filename,
                 save_all=True,
-                append_images=downloaded_images[1:],
+                append_images=resized_images[1:],
                 resolution=100.0,
             )
             return True, output_filename
