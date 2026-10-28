@@ -15,6 +15,20 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
         page = await context.new_page()
 
         try:
+            # Mangabox api orqali keladigan rasmlar ro'yxatini ushlab qolish uchun
+            api_image_urls = []
+
+            async def handle_response(response):
+                if 'mangabox.uz' in response.url and '/pages' in response.url:
+                    try:
+                        data = await response.json()
+                        if 'pages' in data and isinstance(data['pages'], list):
+                            api_image_urls.extend(data['pages'])
+                    except:
+                        pass
+
+            page.on('response', handle_response)
+
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
             # Sahifa nomini olish (Manga nomi va bob raqami)
@@ -74,51 +88,68 @@ async def get_chapter_title_and_download(url: str, output_filename: str):
                 }
             }''')
 
-            # Smooth scrolling to trigger lazy loading for all images
-            last_height = await page.evaluate("document.body.scrollHeight")
-            stagnant_count = 0
-            scroll_attempts = 0
-            max_scroll_attempts = 300 # Increased limit to handle very long manga chapters
+            image_urls = []
 
-            while scroll_attempts < max_scroll_attempts:
-                scroll_attempts += 1
-                # Scroll down by viewport height
-                await page.evaluate("window.scrollBy(0, window.innerHeight)")
+            # API javobi kelishini biroz kutamiz (rasmlar salkam 5 soniyada ham kelishi mumkin)
+            for _ in range(10):
+                if api_image_urls:
+                    break
                 await page.wait_for_timeout(500)
 
-                # Also check if we reached the bottom
-                current_scroll = await page.evaluate("window.scrollY + window.innerHeight")
-                current_height = await page.evaluate("document.body.scrollHeight")
+            # Agar Mangabox API orqali rasmlar ushlab qolingan bo'lsa
+            if api_image_urls:
+                print(f"Found {len(api_image_urls)} images via Mangabox API")
+                image_urls = list(dict.fromkeys(api_image_urls)) # remove duplicates if any
+            else:
+                # Mangalab yoki API ushlanmagan holat uchun:
+                # Smooth scrolling to trigger lazy loading for all images
+                last_height = await page.evaluate("document.body.scrollHeight")
+                stagnant_count = 0
+                scroll_attempts = 0
+                max_scroll_attempts = 300 # Increased limit to handle very long manga chapters
 
-                if current_height > last_height:
-                    last_height = current_height
-                    stagnant_count = 0
-                elif current_scroll >= current_height - 10: # Reached bottom
-                    stagnant_count += 1
+                while scroll_attempts < max_scroll_attempts:
+                    scroll_attempts += 1
+                    # Scroll down by viewport height
+                    await page.evaluate("window.scrollBy(0, window.innerHeight)")
+                    await page.wait_for_timeout(500)
 
-                if stagnant_count >= 5: # Give it some time if it just reached bottom
-                    break
+                    # Also check if we reached the bottom
+                    current_scroll = await page.evaluate("window.scrollY + window.innerHeight")
+                    current_height = await page.evaluate("document.body.scrollHeight")
 
-            # Elementlarni topish
-            image_elements = await page.query_selector_all('img[src*="cdn.mangalab.uz/reader"], img[data-src*="cdn.mangalab.uz/reader"], .reading-content img, .page-break img, .wp-manga-chapter-img, img[src*="cdn.mangabox.uz"]')
+                    if current_height > last_height:
+                        last_height = current_height
+                        stagnant_count = 0
+                    elif current_scroll >= current_height - 10: # Reached bottom
+                        stagnant_count += 1
 
-            if not image_elements:
-                print("No image elements found with selector")
+                    if stagnant_count >= 5: # Give it some time if it just reached bottom
+                        break
+
+                # Elementlarni topish
+                image_elements = await page.query_selector_all('img[src*="cdn.mangalab.uz/reader"], img[data-src*="cdn.mangalab.uz/reader"], .reading-content img, .page-break img, .wp-manga-chapter-img, img[src*="cdn.mangabox.uz"]')
+
+                if not image_elements:
+                    print("No image elements found with selector")
+                    return False, None
+
+                print(f"Found {len(image_elements)} image elements")
+
+                # Extract URLs first
+                for img_el in image_elements:
+                    src = await img_el.get_attribute('data-src') or await img_el.get_attribute('src')
+                    if not src:
+                        continue
+                    if src.startswith('//'):
+                        src = 'https:' + src
+                    elif src.startswith('/'):
+                        src = urljoin(page.url, src)
+                    image_urls.append(src)
+
+            if not image_urls:
+                print("No image urls extracted")
                 return False, None
-
-            print(f"Found {len(image_elements)} image elements")
-
-            # Extract URLs first
-            image_urls = []
-            for img_el in image_elements:
-                src = await img_el.get_attribute('data-src') or await img_el.get_attribute('src')
-                if not src:
-                    continue
-                if src.startswith('//'):
-                    src = 'https:' + src
-                elif src.startswith('/'):
-                    src = urljoin(page.url, src)
-                image_urls.append(src)
 
             downloaded_images = []
 
